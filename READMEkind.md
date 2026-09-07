@@ -77,9 +77,11 @@ yarn start   # ou o comando que você usa para rodar o Backstage
 Após reiniciar o Backstage você terá:
 
 - **Catalog → Components** → `k9-kind-lab` (infraestrutura Kind)
-- **Create → Templates** →  
-  - 🚀 `Criar Cluster Kind` — pede o nome e dispara `setup-cluster.yml`  
+- **Create → Templates** →
+  - 🚀 `Criar Cluster Kind` — pede nome, vCPU e memória por nó e dispara `setup-cluster.yml`
   - 🗑️ `Remover Cluster Kind` — pede o nome e dispara `teardown-cluster.yml`
+
+O perfil padrão para apresentação é de **1 vCPU e 2 GiB por nó**. O formulário também oferece tamanhos maiores para demonstrar o mesmo fluxo de dimensionamento usado em cloud.
 
 ---
 
@@ -92,5 +94,6 @@ Backstage UI
             └─ willsreistech/k9 → setup-cluster.yml
                  └─ self-hosted runner no servidor
                       └─ scripts/setup-cluster.sh
-                           └─ kind create cluster
+                           ├─ kind create cluster
+                           └─ limites por nó via cgroups do Docker
 ```
