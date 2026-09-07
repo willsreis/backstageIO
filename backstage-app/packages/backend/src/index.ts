@@ -77,7 +77,7 @@ backend.add(import('@backstage/plugin-kubernetes-backend'));
 backend.add(import('@backstage/plugin-notifications-backend'));
 backend.add(import('@backstage/plugin-signals-backend'));
 
-// file-upload plugin – receives binaries, saves to ~/data/uploads/, pushes to GitHub
+// file-upload plugin – browses, downloads and updates private GitHub files
 backend.add(fileUploadPlugin);
 
 backend.start();

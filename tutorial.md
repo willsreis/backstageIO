@@ -1058,6 +1058,7 @@ Base URL: `http://localhost:7007/api/file-upload`
 |---|---|---|---|
 | `GET` | `/repos` | — | Lista repos do owner com permissão de escrita |
 | `GET` | `/list` | `?repo=X&path=Y` | Lista conteúdo do diretório `Y` no repo `X` |
+| `GET` | `/download` | `?repo=X&path=Y` | Baixa arquivo privado ou LFS através do backend autenticado |
 | `POST` | `/upload` | form: `file`, `repo`, `uploadPath` | Faz upload e push para GitHub (auto LFS) |
 | `DELETE` | `/delete` | `?path=X&repo=Y` | Deleta arquivo `X` do repo `Y` e cópia local |
 | `GET` | `/health` | — | Verifica status e retorna o diretório de upload |
@@ -1076,6 +1077,14 @@ curl -X POST http://localhost:7007/api/file-upload/upload \
 ```bash
 curl "http://localhost:7007/api/file-upload/list?repo=meu-repositorio&path=releases"
 ```
+
+### Exemplo — Download autenticado
+
+```text
+GET /api/file-upload/download?repo=meu-repositorio&path=documentos/manual.docx
+```
+
+Na interface, `fetchApi` inclui automaticamente a credencial do Backstage. O backend usa a GitHub App para buscar o arquivo privado sem expor o token ao usuário.
 
 ### Exemplo — Deletar arquivo
 

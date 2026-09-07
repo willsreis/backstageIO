@@ -1,6 +1,6 @@
 # backstage-uploader
 
-Um portal Backstage.io customizado que expõe uma interface web para **upload de arquivos binários**, salva os arquivos em disco no diretório `~/data/uploads/` e faz o push automático para o GitHub via API.
+Um portal Backstage.io customizado que expõe uma interface web para navegar, baixar e atualizar arquivos de repositórios GitHub. Usuários autorizados no Backstage não precisam ter acesso direto ao GitHub.
 
 ---
 
@@ -13,7 +13,7 @@ Um portal Backstage.io customizado que expõe uma interface web para **upload de
 - [Instalação](#instalação)
 - [Configuração](#configuração)
 - [Executando o Projeto](#executando-o-projeto)
-- [Usando o Upload](#usando-o-upload)
+- [Usando os Arquivos](#usando-os-arquivos)
 - [API de Upload (Backend)](#api-de-upload-backend)
 - [Códigos Criados e Seus Caminhos](#códigos-criados-e-seus-caminhos)
 - [Fluxo Técnico Detalhado](#fluxo-técnico-detalhado)
@@ -27,8 +27,8 @@ Este projeto é um app Backstage.io (v1.50.0) com dois plugins customizados:
 
 | Plugin | Tipo | Responsabilidade |
 |--------|------|-----------------|
-| `@internal/plugin-file-upload` | Frontend | Página com drag-and-drop para selecionar e enviar o arquivo binário |
-| `@internal/plugin-file-upload-backend` | Backend | Endpoint REST que recebe o arquivo, persiste em `~/data/uploads/` e faz push para o GitHub |
+| `@internal/plugin-file-upload` | Frontend | Navegação, download autenticado e upload/atualização de arquivos |
+| `@internal/plugin-file-upload-backend` | Backend | Intermedeia downloads privados com a GitHub App e publica arquivos no GitHub |
 
 ---
 
@@ -36,9 +36,8 @@ Este projeto é um app Backstage.io (v1.50.0) com dois plugins customizados:
 
 ```
 Browser (React)
-  └─ FileUploadPage.tsx  ──POST /api/file-upload/upload──►  Backend Plugin
-                                                              ├── multer salva em ~/data/uploads/
-                                                              └── @octokit/rest faz push para GitHub
+  └─ FileUploadPage.tsx ──GET /api/file-upload/download──► Backend ──GitHub App──► GitHub privado
+                       └─POST /api/file-upload/upload────► Backend ──GitHub App──► GitHub privado
 ```
 
 ---
@@ -136,7 +135,7 @@ GITHUB_OWNER=willsreistech
 # Nome do repositório de destino (deve existir)
 GITHUB_REPO=nome-do-repositorio
 
-# Repositórios disponíveis no upload, separados por vírgula
+# Repositórios disponíveis para listar, baixar e atualizar, separados por vírgula
 GITHUB_ALLOWED_REPOS=backstageIO,k9,keycloakwsr,platform-database,vagrant
 
 # Branch de destino
@@ -147,10 +146,12 @@ GITHUB_BRANCH=main
 
 O `yarn start` já carrega o `.env` automaticamente (via `dotenv-cli`), então **não é mais necessário** rodar `export ...` manualmente a cada sessão. O `app-config.yaml` interpola as variáveis via `${VARIAVEL}`.
 
-> O deploy decodifica `BACKSTAGE_GH_APP_PRIVATE_KEY_B64` antes de iniciar o backend. O
-> App deve ter `Contents: Read` e `Actions: Read and write`; use
-> `Contents: Write` somente se o plugin de upload precisar gravar no
-> repositório.
+> O deploy decodifica `BACKSTAGE_GH_APP_PRIVATE_KEY_B64` antes de iniciar o backend.
+> A GitHub App deve ter `Contents: Read and write` para baixar e atualizar
+> arquivos. `Actions: Read and write` também é necessário nos repositórios em
+> que o Backstage dispara workflows.
+
+Em produção, instale a GitHub App em cada repositório privado que aparecerá no gerenciador e inclua seu nome em `GITHUB_ALLOWED_REPOS`. Como este fluxo permite baixar e reenviar documentos, a permissão de conteúdo precisa ser **Read and write**.
 
 ---
 
@@ -178,18 +179,31 @@ Acesse: **http://localhost:3000**
 
 ---
 
-## Usando o Upload
+## Usando os Arquivos
 
 1. Abra **http://localhost:3000/file-upload**
-2. Arraste um arquivo binário para a área de drop ou clique para selecionar
-3. Clique em **"Upload & Push to GitHub"**
-4. O sistema mostra:
-   - O resultado da publicação (o arquivo temporário local é removido)
-   - A URL do arquivo no GitHub
+2. Selecione um repositório e navegue até o documento
+3. Use o botão de download; o backend entrega o conteúdo privado usando a GitHub App
+4. Edite o arquivo localmente
+5. No mesmo diretório, selecione o arquivo editado e clique em **"Upload or update"**
+
+O nome precisa permanecer igual para atualizar o documento existente. O acesso é autorizado pelos grupos definidos em `fileUpload.allowedGroups`; o token da GitHub App nunca é enviado ao navegador.
 
 ---
 
 ## API de Upload (Backend)
+
+### `GET /api/file-upload/download`
+
+Baixa um arquivo de um repositório permitido por meio do backend autenticado. Funciona com arquivos normais e objetos Git LFS.
+
+**Parâmetros:** `repo` e `path`.
+
+```text
+GET /api/file-upload/download?repo=nome-repo&path=documentos/manual.docx
+```
+
+O endpoint exige a autenticação do Backstage e retorna o arquivo como anexo, com `Cache-Control: private, no-store`.
 
 ### `POST /api/file-upload/upload`
 
@@ -289,9 +303,10 @@ export const fileUploadPlugin = createBackendPlugin({
 Coração do backend. Responsável por:
 
 1. **Criar o diretório** `~/data/uploads/` se não existir
-2. **Configurar o multer** com armazenamento em disco (limite de 100 MB)
-3. **`POST /upload`** — salva o arquivo e faz push para o GitHub
-4. **`GET /health`** — health check
+2. **Configurar o multer** com armazenamento em disco (limite configurável, padrão de 500 MB)
+3. **`GET /download`** — transmite arquivos privados e resolve Git LFS
+4. **`POST /upload`** — salva o arquivo e faz push para o GitHub
+5. **`GET /health`** — health check
 
 **Trecho principal da lógica de push:**
 
@@ -330,7 +345,7 @@ export { fileUploadPlugin } from './plugin';
 
 Cria a extensão de página usando `PageBlueprint` do novo frontend system. Define:
 - Rota: `/file-upload`
-- Título: "File Upload" (aparece no menu lateral automaticamente)
+- Título: "Repository Files" (aparece no menu lateral automaticamente)
 - Ícone: `CloudUploadIcon`
 - Carregamento lazy da página via `import()` dinâmico
 
@@ -338,7 +353,7 @@ Cria a extensão de página usando `PageBlueprint` do novo frontend system. Defi
 const fileUploadPage = PageBlueprint.make({
   params: {
     path: '/file-upload',
-    title: 'File Upload',
+    title: 'Repository Files',
     icon: <CloudUploadIcon fontSize="inherit" />,
     loader: async () => {
       const { FileUploadPage } = await import('./components/FileUploadPage');
@@ -356,9 +371,11 @@ export const fileUploadPlugin = createFrontendPlugin({
 #### `plugins/file-upload/src/components/FileUploadPage.tsx`
 
 Componente React com:
+- **Navegador de diretórios** para repositórios privados permitidos
+- **Download autenticado** sem redirecionar o usuário ao GitHub
 - **Área de drag-and-drop** para selecionar o arquivo
 - **Chip** com nome e tamanho do arquivo selecionado
-- **Botão** "Upload & Push to GitHub" (desabilitado sem arquivo)
+- **Botão** "Upload or update" (desabilitado sem arquivo)
 - **Barra de progresso** durante o upload
 - **Painel de resultado** com caminho local e URL do GitHub
 
@@ -407,21 +424,19 @@ fileUpload:
 ## Fluxo Técnico Detalhado
 
 ```
-1. Usuário acessa http://localhost:3000/file-upload
-2. React carrega FileUploadPage.tsx
-3. Usuário seleciona um repositório e navega até o diretório desejado
-4. Usuário seleciona/arrasta arquivo binário
-5. Clica em "Upload & Push to GitHub"
-6. Browser envia POST multipart/form-data para http://localhost:7007/api/file-upload/upload
-7. Backend (router.ts):
+1. Usuário acessa http://localhost:3000/file-upload e seleciona um repositório
+2. Para baixar, o browser chama `GET /api/file-upload/download`; o backend valida usuário, repositório e caminho e transmite o conteúdo usando a GitHub App
+3. Usuário edita o documento e seleciona o mesmo diretório no plugin
+4. Browser envia `POST multipart/form-data` para `/api/file-upload/upload`
+5. Backend (router.ts):
    a. multer intercepta o upload e salva em ~/data/uploads/<timestamp>-<nome>
    b. Lê o arquivo do disco como Buffer
    c. Converte para Base64
    d. Solicita um token de instalação curto do GitHub App
    e. Verifica se o arquivo já existe no repo (para obter o sha)
    f. Chama octokit.repos.createOrUpdateFileContents()
-   g. Retorna JSON com localPath e URL do GitHub
-8. Frontend exibe o resultado com links clicáveis
+   g. Retorna o resultado e a referência do arquivo no GitHub
+6. Frontend atualiza a listagem e exibe o resultado
 ```
 
 ---

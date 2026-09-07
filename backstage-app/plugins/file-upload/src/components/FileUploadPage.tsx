@@ -30,6 +30,7 @@ import RefreshIcon from '@material-ui/icons/Refresh';
 import FolderIcon from '@material-ui/icons/Folder';
 import InsertDriveFileIcon from '@material-ui/icons/InsertDriveFile';
 import StorageIcon from '@material-ui/icons/Storage';
+import GetAppIcon from '@material-ui/icons/GetApp';
 import { Page, Header, Content } from '@backstage/core-components';
 import { discoveryApiRef, fetchApiRef, useApi } from '@backstage/core-plugin-api';
 
@@ -97,11 +98,6 @@ const useStyles = makeStyles(theme => ({
       gridTemplateColumns: '1fr',
     },
   },
-  fileLink: {
-    color: theme.palette.primary.main,
-    textDecoration: 'none',
-    '&:hover': { textDecoration: 'underline' },
-  },
   resultPaper: {
     width: '100%',
     padding: theme.spacing(2),
@@ -152,8 +148,6 @@ interface RepoItem {
   path: string;        // full path from repo root
   sha: string;
   size: number;
-  url: string;
-  downloadUrl: string | null;
 }
 
 export const FileUploadPage = () => {
@@ -181,6 +175,8 @@ export const FileUploadPage = () => {
   const [items, setItems] = useState<RepoItem[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // ── Upload ────────────────────────────────────────────────────────────────
   const [file, setFile] = useState<File | null>(null);
@@ -193,6 +189,7 @@ export const FileUploadPage = () => {
   const fetchItems = useCallback(async (repo: string, path: string) => {
     if (!repo || !pluginBaseUrl) return;
     setLoadingList(true);
+    setDownloadError(null);
     try {
       const url = `${pluginBaseUrl}/list?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`;
       const res  = await fetchApi.fetch(url);
@@ -304,6 +301,34 @@ export const FileUploadPage = () => {
     }
   };
 
+  const handleDownload = async (item: RepoItem) => {
+    setDownloadingFile(item.path);
+    setDownloadError(null);
+    try {
+      const url = `${pluginBaseUrl}/download?path=${encodeURIComponent(item.path)}&repo=${encodeURIComponent(selectedRepo)}`;
+      const res = await fetchApi.fetch(url);
+      if (!res.ok) {
+        const payload = await res.json().catch(() => undefined) as
+          | { error?: string }
+          | undefined;
+        throw new Error(payload?.error ?? `Download failed: HTTP ${res.status}`);
+      }
+
+      const objectUrl = URL.createObjectURL(await res.blob());
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = item.name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    } catch (err: any) {
+      setDownloadError(err.message);
+    } finally {
+      setDownloadingFile(null);
+    }
+  };
+
   const LFS_EXTENSIONS = ['.ear', '.exe', '.war', '.jar', '.zip'];
   const willUseLfs = (f: File) =>
     f.size > 100 * 1024 * 1024 || LFS_EXTENSIONS.includes(f.name.substring(f.name.lastIndexOf('.')).toLowerCase());
@@ -319,8 +344,8 @@ export const FileUploadPage = () => {
   return (
     <Page themeId="tool">
       <Header
-        title="Binary File Upload"
-        subtitle="Select a repository, upload binaries and manage files on GitHub"
+        title="Repository Files"
+        subtitle="Download, edit and upload files without direct GitHub access"
       />
       <Content>
         <div className={classes.root}>
@@ -435,7 +460,7 @@ export const FileUploadPage = () => {
                     <TableRow>
                       <TableCell>Name</TableCell>
                       <TableCell align="right">Size</TableCell>
-                      <TableCell align="center">Delete</TableCell>
+                      <TableCell align="center">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -458,9 +483,7 @@ export const FileUploadPage = () => {
                           ) : (
                             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <InsertDriveFileIcon fontSize="small" color="action" />
-                              <a className={classes.fileLink} href={item.url} target="_blank" rel="noopener noreferrer">
-                                {item.name}
-                              </a>
+                              <span>{item.name}</span>
                             </span>
                           )}
                         </TableCell>
@@ -469,25 +492,47 @@ export const FileUploadPage = () => {
                         </TableCell>
                         <TableCell align="center">
                           {item.type === 'file' && (
-                            <Tooltip title="Delete file from GitHub">
-                              <span>
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleDelete(item)}
-                                  disabled={deletingFile === item.path}
-                                >
-                                  {deletingFile === item.path
-                                    ? <CircularProgress size={16} />
-                                    : <DeleteIcon color="error" />}
-                                </IconButton>
-                              </span>
-                            </Tooltip>
+                            <span>
+                              <Tooltip title="Download through Backstage">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleDownload(item)}
+                                    disabled={downloadingFile === item.path}
+                                    aria-label={`Download ${item.name}`}
+                                  >
+                                    {downloadingFile === item.path
+                                      ? <CircularProgress size={16} />
+                                      : <GetAppIcon color="primary" />}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                              <Tooltip title="Delete file from GitHub">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleDelete(item)}
+                                    disabled={deletingFile === item.path}
+                                    aria-label={`Delete ${item.name}`}
+                                  >
+                                    {deletingFile === item.path
+                                      ? <CircularProgress size={16} />
+                                      : <DeleteIcon color="error" />}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </span>
                           )}
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
+              )}
+              {downloadError && (
+                <Typography variant="body2" color="error" style={{ paddingTop: 12 }}>
+                  {downloadError}
+                </Typography>
               )}
             </Paper>
 
@@ -496,7 +541,7 @@ export const FileUploadPage = () => {
               <div className={classes.sectionHeader}>
                 <div className={classes.sectionTitle}>
                   <CloudUploadIcon color="action" />
-                  <Typography variant="h6">3. Upload Binary</Typography>
+                  <Typography variant="h6">3. Upload or Update File</Typography>
                 </div>
               </div>
               <Divider style={{ marginBottom: 16 }} />
@@ -517,7 +562,7 @@ export const FileUploadPage = () => {
                   <Typography variant="body1" color="textSecondary">
                     {noRepo
                       ? 'Select a repository first'
-                      : 'Drag & drop a binary here, or click to select'}
+                      : 'Drag & drop a file here, or click to select'}
                   </Typography>
                   {file && (
                     <Chip
@@ -543,7 +588,7 @@ export const FileUploadPage = () => {
                   onClick={handleUpload}
                   disabled={!file || !selectedRepo || state === 'uploading'}
                 >
-                  {state === 'uploading' ? 'Uploading…' : `Upload to /${currentPath || selectedRepo || '…'}`}
+                  {state === 'uploading' ? 'Uploading…' : `Upload or update in /${currentPath || selectedRepo || '…'}`}
                 </Button>
 
                 {state === 'uploading' && <LinearProgress className={classes.progressBar} />}

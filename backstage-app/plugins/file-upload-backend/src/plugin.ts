@@ -5,8 +5,8 @@ import {
 import { createRouter } from './router';
 
 /**
- * Backstage backend plugin that exposes a REST endpoint to receive binary
- * file uploads, persist them under ~/data/uploads/, and push them to GitHub.
+ * Backstage backend plugin for authenticated private-repository downloads and
+ * file updates through GitHub.
  */
 export const fileUploadPlugin = createBackendPlugin({
   pluginId: 'file-upload',

@@ -19,6 +19,8 @@ import fs from 'fs';
 import crypto from 'crypto';
 import https from 'https';
 import http from 'http';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { Octokit } from '@octokit/rest';
 
 
@@ -135,6 +137,60 @@ async function getGitHubCredentials(
 
 function getGitHubAuthHeaders(credentials: GithubCredentials): Record<string, string> {
   return credentials.headers ?? { Authorization: `Bearer ${credentials.token}` };
+}
+
+interface LfsPointer {
+  oid: string;
+  size: number;
+}
+
+/** Detects the small pointer committed by Git LFS in place of the real file. */
+function parseLfsPointer(content: string): LfsPointer | undefined {
+  if (!content.startsWith('version https://git-lfs.github.com/spec/v1')) {
+    return undefined;
+  }
+
+  const oid = content.match(/^oid sha256:([0-9a-f]{64})$/m)?.[1];
+  const rawSize = content.match(/^size ([0-9]+)$/m)?.[1];
+  if (!oid || !rawSize) return undefined;
+
+  const size = Number(rawSize);
+  return Number.isSafeInteger(size) && size >= 0 ? { oid, size } : undefined;
+}
+
+function attachmentHeader(filename: string): string {
+  const fallback = filename
+    .replace(/[^\x20-\x7E]/g, '_')
+    .replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename).replace(
+    /['()*]/g,
+    char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+async function streamDownload(
+  upstream: globalThis.Response,
+  res: Response,
+  filename: string,
+): Promise<void> {
+  if (!upstream.ok) {
+    throw new Error(`GitHub download failed: HTTP ${upstream.status}`);
+  }
+  if (!upstream.body) {
+    throw new Error('GitHub download returned an empty response body.');
+  }
+
+  res.status(200);
+  res.setHeader(
+    'Content-Type',
+    upstream.headers.get('content-type') ?? 'application/octet-stream',
+  );
+  res.setHeader('Content-Disposition', attachmentHeader(filename));
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  await pipeline(Readable.fromWeb(upstream.body as any), res);
 }
 
 /** Returns true when the file should be pushed via Git LFS. */
@@ -449,8 +505,6 @@ export async function createRouter(options: RouterOptions): Promise<Router> {
               path:        item.path  as string,
               sha:         item.sha   as string,
               size:        (item.size as number) ?? 0,
-              url:         item.html_url     as string,
-              downloadUrl: (item.download_url as string | null) ?? null,
             }));
           // Dirs first, then files, each group sorted alphabetically
           items.sort((a: any, b: any) => {
@@ -466,6 +520,120 @@ export async function createRouter(options: RouterOptions): Promise<Router> {
     } catch (err: any) {
       logger.error(`List failed: ${err.message}`);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /download ─────────────────────────────────────────────────────────
+  // Proxies a private GitHub file to an authenticated Backstage user without
+  // exposing the GitHub App token. Git LFS objects are resolved transparently.
+  router.get('/download', requirePublisher, async (req: Request, res: Response) => {
+    const requestedPath = req.query.path as string | undefined;
+    if (!requestedPath) {
+      res.status(400).json({ error: 'Missing required query param: path' });
+      return;
+    }
+
+    try {
+      const cfg = getGitHubConfig(config);
+      const repo = getAllowedRepo(req.query.repo, cfg);
+      const filePath = normalizeRepoPath(requestedPath);
+      const { owner, branch } = cfg;
+      const credentials = await getGitHubCredentials(cfg, repo);
+      const octokit = new Octokit({ auth: credentials.token });
+
+      const metadata = await octokit.repos.getContent({
+        owner,
+        repo,
+        path: filePath,
+        ref: branch,
+      });
+      if (Array.isArray(metadata.data) || metadata.data.type !== 'file') {
+        res.status(400).json({ error: 'Target is a directory, not a file.' });
+        return;
+      }
+
+      let lfsPointer: LfsPointer | undefined;
+      const fileData = metadata.data as any;
+      if (fileData.encoding === 'base64' && fileData.content) {
+        lfsPointer = parseLfsPointer(
+          Buffer.from(fileData.content, 'base64').toString('utf8'),
+        );
+      }
+
+      let upstream: globalThis.Response;
+      if (lfsPointer) {
+        const batchResponse = await fetch(
+          `https://github.com/${owner}/${repo}.git/info/lfs/objects/batch`,
+          {
+            method: 'POST',
+            headers: {
+              ...getGitHubAuthHeaders(credentials),
+              'Content-Type': 'application/vnd.git-lfs+json',
+              Accept: 'application/vnd.git-lfs+json',
+            },
+            body: JSON.stringify({
+              operation: 'download',
+              transfers: ['basic'],
+              refs: { name: `refs/heads/${branch}` },
+              objects: [{ oid: lfsPointer.oid, size: lfsPointer.size }],
+            }),
+          },
+        );
+        if (!batchResponse.ok) {
+          throw new Error(`LFS batch download failed: HTTP ${batchResponse.status}`);
+        }
+
+        const batchData = await batchResponse.json() as any;
+        const lfsObject = batchData.objects?.[0];
+        if (!lfsObject || lfsObject.error) {
+          throw new Error(lfsObject?.error?.message ?? 'LFS object was not found.');
+        }
+        const downloadAction = lfsObject.actions?.download as
+          | { href: string; header?: Record<string, string> }
+          | undefined;
+        if (!downloadAction?.href) {
+          throw new Error('LFS server did not provide a download action.');
+        }
+
+        upstream = await fetch(downloadAction.href, {
+          headers: downloadAction.header ?? {},
+        });
+      } else {
+        const encodedPath = filePath
+          .split('/')
+          .map(segment => encodeURIComponent(segment))
+          .join('/');
+        const rawUrl = new URL(
+          `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`,
+        );
+        rawUrl.searchParams.set('ref', branch);
+        upstream = await fetch(rawUrl, {
+          headers: {
+            ...getGitHubAuthHeaders(credentials),
+            Accept: 'application/vnd.github.raw+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+        });
+      }
+
+      await streamDownload(
+        upstream,
+        res,
+        filePath.split('/').pop() ?? 'download',
+      );
+      logger.info(`File downloaded through Backstage: ${owner}/${repo}/${filePath}`);
+    } catch (err: any) {
+      logger.error(`Download file failed: ${err.message}`);
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      const status = err.status === 404 ? 404 : 502;
+      res.status(status).json({
+        error: status === 404
+          ? 'File not found.'
+          : 'The file could not be downloaded. Check the backend logs.',
+      });
     }
   });
 

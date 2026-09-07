@@ -67,7 +67,7 @@ integrations:
             - willsreistech
 
 # ── File Upload Plugin ─────────────────────────────────────────────────────
-# Configure the binary upload & GitHub push behaviour.
+# Configure private repository browsing, downloads and file updates.
 fileUpload:
   github:
     owner: ${GITHUB_OWNER}   # GitHub user or organization name
@@ -76,7 +76,7 @@ fileUpload:
     # Lista separada por vírgulas. Nunca permita todos os repositórios
     # acessíveis ao GitHub App implicitamente.
     allowedRepos: ${GITHUB_ALLOWED_REPOS}
-  # Grupos do catálogo autorizados a publicar/remover artefatos.
+  # Grupos do catálogo autorizados a listar, baixar, publicar e remover arquivos.
   allowedGroups:
     - group:default/platform-admin
     - group:default/artifact-publisher

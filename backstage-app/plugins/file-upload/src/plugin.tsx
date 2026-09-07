@@ -13,7 +13,7 @@ const fileUploadPage = PageBlueprint.make({
   params: {
     path: '/file-upload',
     routeRef: rootRouteRef,
-    title: 'File Upload',
+    title: 'Repository Files',
     icon: <CloudUploadIcon fontSize="inherit" />,
     loader: async () => {
       const { FileUploadPage } = await import('./components/FileUploadPage');
@@ -26,7 +26,7 @@ const fileUploadPage = PageBlueprint.make({
 const fileUploadNavItem = NavItemBlueprint.make({
   params: {
     routeRef: rootRouteRef,
-    title: 'File Upload',
+    title: 'Repository Files',
     icon: CloudUploadIcon,
   },
 });
