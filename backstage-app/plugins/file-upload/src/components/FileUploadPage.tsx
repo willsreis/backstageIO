@@ -88,6 +88,13 @@ const useStyles = makeStyles(theme => ({
     gap: theme.spacing(1),
   },
   repoSelect: { minWidth: 320 },
+  fileActions: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing(0.5),
+    whiteSpace: 'nowrap',
+  },
   twoCol: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
@@ -443,6 +450,11 @@ export const FileUploadPage = () => {
                 ))}
               </Breadcrumbs>
               <Divider />
+              {!noRepo && (
+                <Typography variant="caption" color="textSecondary" style={{ display: 'block', padding: '8px 0' }}>
+                  Open a folder or click Download next to any file.
+                </Typography>
+              )}
 
               {noRepo && (
                 <Typography variant="body2" color="textSecondary" style={{ padding: 16, textAlign: 'center' }}>
@@ -460,7 +472,7 @@ export const FileUploadPage = () => {
                     <TableRow>
                       <TableCell>Name</TableCell>
                       <TableCell align="right">Size</TableCell>
-                      <TableCell align="center">Actions</TableCell>
+                      <TableCell align="center">Download / Delete</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -492,21 +504,20 @@ export const FileUploadPage = () => {
                         </TableCell>
                         <TableCell align="center">
                           {item.type === 'file' && (
-                            <span>
-                              <Tooltip title="Download through Backstage">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => handleDownload(item)}
-                                    disabled={downloadingFile === item.path}
-                                    aria-label={`Download ${item.name}`}
-                                  >
-                                    {downloadingFile === item.path
-                                      ? <CircularProgress size={16} />
-                                      : <GetAppIcon color="primary" />}
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
+                            <div className={classes.fileActions}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="primary"
+                                startIcon={downloadingFile === item.path
+                                  ? <CircularProgress size={14} />
+                                  : <GetAppIcon />}
+                                onClick={() => handleDownload(item)}
+                                disabled={downloadingFile === item.path}
+                                aria-label={`Download ${item.name}`}
+                              >
+                                {downloadingFile === item.path ? 'Downloading…' : 'Download'}
+                              </Button>
                               <Tooltip title="Delete file from GitHub">
                                 <span>
                                   <IconButton
@@ -521,7 +532,7 @@ export const FileUploadPage = () => {
                                   </IconButton>
                                 </span>
                               </Tooltip>
-                            </span>
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>
