@@ -50,6 +50,13 @@ on:
         required: false
         type: string
         default: '.'
+    secrets:
+      MINIO_ROOT_USER:
+        description: Usuário de acesso ao bucket TechDocs no MinIO
+        required: true
+      MINIO_ROOT_PASSWORD:
+        description: Senha de acesso ao bucket TechDocs no MinIO
+        required: true
 
 jobs:
   publish:
@@ -71,10 +78,17 @@ jobs:
         with:
           node-version: 22
 
+      # O runner pode ter apenas o interpretador do sistema, sem pip. O action
+      # provisiona uma instalação isolada e reproduzível, sem sudo/apt.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
       - name: Install MkDocs (TechDocs generator)
         run: |
-          python3 -m pip install --user --upgrade mkdocs-techdocs-core
-          python3 -c "import techdocs_core"   # sanity check (módulo = techdocs_core)
+          python -m pip install --upgrade mkdocs-techdocs-core
+          python -c "import techdocs_core"   # sanity check (módulo = techdocs_core)
 
       - name: Generate docs
         run: |
