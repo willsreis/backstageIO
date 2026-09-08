@@ -12,6 +12,23 @@ app:
     - nav-item:catalog: false
     - nav-item:scaffolder: false
 
+    # Abre o Catalog Graph com uma raiz real e tipos selecionados. Sem estado
+    # inicial, a página standalone pode aparecer vazia até o usuário configurar
+    # manualmente os filtros.
+    - page:catalog-graph:
+        config:
+          initialState:
+            rootEntityRefs:
+              - component:default/k9-kind-lab
+            selectedKinds:
+              - component
+              - system
+              - api
+              - resource
+              - group
+              - user
+            maxDepth: 3
+
     # Configure the catalog index page to be the root page, this is normally mounted on /catalog
     - page:catalog:
         config:
